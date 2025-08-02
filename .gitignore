@@ -1,3 +1,8 @@
+# Shell scripts
+*.sh
+*.bat
+*.cmd
+
 # Python
 __pycache__/
 *.py[cod]
@@ -53,12 +58,12 @@ logs/
 ehthumbs.db
 Thumbs.db
 
-# Data files (optional - you might want to keep sample data)
+# Data files
 data/*.db
 data/*.sqlite
 data/*.json
 
-# Docker (since you don't want Docker files)
+# Docker files (excluding from GitHub)
 Dockerfile
 docker-compose.yml
 .dockerignore
