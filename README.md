@@ -14,6 +14,7 @@ A web application for scraping job listings from Iranian job sites (Jobinja and 
 
 - [Jobinja.ir](https://jobinja.ir)
 - [Jobvision.ir](https://jobvision.ir)
+- [irantalent.com](https://www.irantalent.com/)
 
 ## Screenshots
 
