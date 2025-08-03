@@ -39,6 +39,7 @@ def scrape_jobs():
         global scraping_status
         try:
             scraper = JobScraper()
+            scraper.debug_irantalent('devops')
             total_jobs = scraper.scrape_all(keyword, sources)
             scraping_status['message'] = f'Successfully scraped {total_jobs} jobs'
         except Exception as e:

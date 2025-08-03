@@ -18,53 +18,53 @@ class JobScraper:
     def __init__(self):
         self.session = Session()
 
-    # def setup_selenium(self):
-    #     """Setup Selenium WebDriver for dynamic content"""
-    #     options = Options()
-    #     options.add_argument('--headless')
-    #     options.add_argument('--no-sandbox')
-    #     options.add_argument('--disable-dev-shm-usage')
-    #     options.add_argument(
-    #         'user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36')
-    #
-    #     service = ChromeService(ChromeDriverManager().install())
-    #     driver = webdriver.Chrome(service=service, options=options)
-    #     return driver
-
     def setup_selenium(self):
         """Setup Selenium WebDriver for dynamic content"""
         options = Options()
         options.add_argument('--headless')
         options.add_argument('--no-sandbox')
         options.add_argument('--disable-dev-shm-usage')
-        options.add_argument('--disable-gpu')
-        options.add_argument('--disable-web-security')
-        options.add_argument('--allow-running-insecure-content')
-        options.add_argument('--disable-extensions')
-        options.add_argument('--disable-plugins')
-        options.add_argument('--disable-images')
-        options.add_argument('--window-size=1920,1080')
         options.add_argument(
             'user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36')
 
-        # For Alpine Linux - use system chromium
-        options.binary_location = '/usr/bin/chromium-browser'
+        service = ChromeService(ChromeDriverManager().install())
+        driver = webdriver.Chrome(service=service, options=options)
+        return driver
 
-        try:
-            # Use system chromedriver directly (no webdriver-manager in container)
-            import os
-            if os.path.exists('/usr/bin/chromedriver'):
-                service = ChromeService('/usr/bin/chromedriver')
-                driver = webdriver.Chrome(service=service, options=options)
-                return driver
-            else:
-                # Fallback to webdriver-manager only if system driver not found
-                service = ChromeService(ChromeDriverManager().install())
-                driver = webdriver.Chrome(service=service, options=options)
-                return driver
-        except Exception as e:
-            print(f"Error setting up Chrome driver: {e}")
-            raise e
+    # def setup_selenium(self):
+    #     """Setup Selenium WebDriver for dynamic content"""
+    #     options = Options()
+    #     options.add_argument('--headless')
+    #     options.add_argument('--no-sandbox')
+    #     options.add_argument('--disable-dev-shm-usage')
+    #     options.add_argument('--disable-gpu')
+    #     options.add_argument('--disable-web-security')
+    #     options.add_argument('--allow-running-insecure-content')
+    #     options.add_argument('--disable-extensions')
+    #     options.add_argument('--disable-plugins')
+    #     options.add_argument('--disable-images')
+    #     options.add_argument('--window-size=1920,1080')
+    #     options.add_argument(
+    #         'user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36')
+    #
+    #     # For Alpine Linux - use system chromium
+    #     options.binary_location = '/usr/bin/chromium-browser'
+    #
+    #     try:
+    #         # Use system chromedriver directly (no webdriver-manager in container)
+    #         import os
+    #         if os.path.exists('/usr/bin/chromedriver'):
+    #             service = ChromeService('/usr/bin/chromedriver')
+    #             driver = webdriver.Chrome(service=service, options=options)
+    #             return driver
+    #         else:
+    #             # Fallback to webdriver-manager only if system driver not found
+    #             service = ChromeService(ChromeDriverManager().install())
+    #             driver = webdriver.Chrome(service=service, options=options)
+    #             return driver
+    #     except Exception as e:
+    #         print(f"Error setting up Chrome driver: {e}")
+    #         raise e
 
 
 
@@ -276,6 +276,141 @@ class JobScraper:
 
         return jobs
 
+    def scrape_irantalent(self, keyword, max_results=30):
+        """Alternative IranTalent scraper with different approach"""
+        jobs = []
+        base_url = "https://www.irantalent.com"
+
+        try:
+            from selenium.webdriver.common.by import By
+            from selenium.webdriver.support.ui import WebDriverWait
+            from selenium.webdriver.support import expected_conditions as EC
+
+            search_url = f"{base_url}/jobs/{keyword}"
+            driver = self.setup_selenium()
+            driver.get(search_url)
+
+            # Wait for specific elements
+            try:
+                WebDriverWait(driver, 15).until(
+                    EC.presence_of_element_located((By.CLASS_NAME, "card-wrapper"))
+                )
+                print("Job cards loaded!")
+            except:
+                print("Timeout waiting for job cards")
+
+            # Additional wait
+            time.sleep(3)
+
+            # Execute JavaScript to get job data directly
+            job_data_script = """
+            var jobs = [];
+            var cards = document.querySelectorAll('div.card-wrapper');
+
+            cards.forEach(function(card) {
+                var link = card.querySelector('a.position');
+                var title = card.querySelector('p.position-title');
+                var company = card.querySelector('p.color-light-black');
+                var location = card.querySelector('span.location');
+                var salaryDiv = card.querySelector('div.salary span');
+                var dateSpans = card.querySelectorAll('span.color-gray');
+
+                if (link && title) {
+                    var dateText = '';
+                    dateSpans.forEach(function(span) {
+                        if (span.textContent.includes('روز پیش') || 
+                            span.textContent.includes('ساعت پیش') ||
+                            span.textContent.includes('هفته پیش')) {
+                            dateText = span.textContent.trim();
+                        }
+                    });
+
+                    jobs.push({
+                        link: link.getAttribute('href'),
+                        title: title.textContent.trim(),
+                        company: company ? company.textContent.trim() : 'نامشخص',
+                        location: location ? location.textContent.trim() : 'تهران',
+                        salary: salaryDiv ? salaryDiv.textContent.trim() : '',
+                        date: dateText
+                    });
+                }
+            });
+
+            return jobs;
+            """
+
+            # Execute script to get jobs
+            js_jobs = driver.execute_script(job_data_script)
+
+            print(f"Found {len(js_jobs)} jobs via JavaScript")
+
+            # Process JavaScript results
+            for js_job in js_jobs[:max_results]:
+                job_link = js_job['link']
+                if job_link.startswith('/'):
+                    job_link = base_url + job_link
+
+                job_data = {
+                    'title': js_job['title'],
+                    'company': js_job['company'],
+                    # 'location': js_job['location'],
+                    'city': js_job['location'],  # Changed from 'location' to 'city'
+                    'link': job_link,
+                    'salary': js_job['salary'],
+                    'date': js_job['date'],
+                    'source': 'irantalent'
+                }
+
+                jobs.append(job_data)
+                print(f"Added: {js_job['title']} at {js_job['company']}")
+
+            driver.quit()
+
+        except Exception as e:
+            print(f"Error in alternative scraper: {e}")
+            import traceback
+            traceback.print_exc()
+
+        return jobs
+
+    def debug_irantalent(self, keyword):
+        """Debug function to see what's on the page"""
+        try:
+            driver = self.setup_selenium()
+            url = f"https://www.irantalent.com/jobs/{keyword}"
+            driver.get(url)
+
+            print("Waiting for page load...")
+            time.sleep(10)
+
+            # Check various elements
+            checks = [
+                ('div.card-wrapper', 'Card wrappers'),
+                ('new-position-card', 'Position cards'),
+                ('a.position', 'Position links'),
+                ('p.position-title', 'Position titles'),
+                ('a[href*="/job/"]', 'Job links'),
+                ('.ng-star-inserted', 'Angular elements')
+            ]
+
+            for selector, name in checks:
+                elements = driver.find_elements(By.CSS_SELECTOR, selector)
+                print(f"{name}: {len(elements)} found")
+
+            # Save screenshot
+            driver.save_screenshot('irantalent_debug.png')
+            print("Screenshot saved as irantalent_debug.png")
+
+            # Save full HTML
+            with open('irantalent_full_debug.html', 'w', encoding='utf-8') as f:
+                f.write(driver.page_source)
+            print("Full HTML saved as irantalent_full_debug.html")
+
+            driver.quit()
+
+        except Exception as e:
+            print(f"Debug error: {e}")
+
     def save_jobs(self, jobs, keyword):
         """Save jobs to database"""
         saved_count = 0
@@ -306,6 +441,8 @@ class JobScraper:
         self.session.commit()
         print(f"Saved {saved_count} new jobs to database")
 
+
+
     def scrape_all(self, keyword, sources, max_results_per_site=30):
         """Scrape all selected sources"""
         # Clear previous results for this keyword
@@ -330,6 +467,15 @@ class JobScraper:
                 print(f"Found {len(jobvision_jobs)} jobs on Jobvision")
             except Exception as e:
                 print(f"Error scraping Jobvision: {e}")
+
+        if 'irantalent' in sources:
+            print("Scraping irantalent...")
+            try:
+                irantalent_jobs = self.scrape_irantalent(keyword, max_results_per_site)
+                all_jobs.extend(irantalent_jobs)
+                print(f"Found {len(irantalent_jobs)} jobs on irantalent")
+            except Exception as e:
+                print(f"Error scraping irantalent: {e}")
 
         # Save to database
         if all_jobs:
