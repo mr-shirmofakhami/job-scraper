@@ -116,8 +116,38 @@
         </div>
     </div>
 
+        <!-- Add this button to your interface -->
+    <button type="button" id="clear-results" class="btn btn-warning">
+         پاک کردن نتایج
+    </button>
+
     <script>
         let statusInterval;
+
+        // Add this to your JavaScript
+        document.getElementById('clear-results').addEventListener('click', function() {
+        if (confirm('آیا مطمئن هستید که می‌خواهید نتایج را پاک کنید؟')) {
+        fetch('/api/clear-session', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            alert(data.message);
+            // Reload the page or clear the results display
+            location.reload();
+        });
+         }
+        });
+
+        // Optional: Show session info
+        fetch('/api/session-info')
+        .then(response => response.json())
+        .then(data => {
+            console.log('Session info:', data);
+         });
 
         async function startScraping() {
             const keyword = document.getElementById('keyword').value.trim();

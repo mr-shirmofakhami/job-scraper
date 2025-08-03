@@ -12,10 +12,14 @@ import re
 from models import Session, JobListing
 from datetime import datetime
 import urllib.parse
+from models import Session as DBSession, JobListing
+from session_manager import SessionJobManager
+from datetime import datetime
 
 
 class JobScraper:
-    def __init__(self):
+    def __init__(self, session_manager=None):
+        self.session_manager = session_manager or SessionJobManager()
         self.session = Session()
 
     def setup_selenium(self):
@@ -411,44 +415,127 @@ class JobScraper:
         except Exception as e:
             print(f"Debug error: {e}")
 
-    def save_jobs(self, jobs, keyword):
-        """Save jobs to database"""
-        saved_count = 0
-        for job in jobs:
+    # def save_jobs(self, jobs, keyword):
+    #     """Save jobs to database"""
+    #     saved_count = 0
+    #     for job in jobs:
+    #         try:
+    #             # Check if job already exists (by link)
+    #             existing = self.session.query(JobListing).filter_by(
+    #                 link=job['link'],
+    #                 search_keyword=keyword
+    #             ).first()
+    #
+    #             if not existing:
+    #                 job_listing = JobListing(
+    #                     title=job['title'],
+    #                     company=job['company'],
+    #                     city=job['city'],
+    #                     link=job['link'],
+    #                     source=job['source'],
+    #                     search_keyword=keyword,
+    #                     is_active=True
+    #                 )
+    #                 self.session.add(job_listing)
+    #                 saved_count += 1
+    #         except Exception as e:
+    #             print(f"Error saving job: {e}")
+    #             continue
+    #
+    #     self.session.commit()
+    #     print(f"Saved {saved_count} new jobs to database")
+
+    def save_jobs(self, jobs, search_keyword, session_id=None):
+        """Save jobs to database using SQLAlchemy"""
+        if session_id and self.session_manager:
+            return self.session_manager.save_session_jobs(session_id, jobs, search_keyword)
+        else:
+            # Fallback to regular save without session
+            db = DBSession()
+            saved_count = 0
+
             try:
-                # Check if job already exists (by link)
-                existing = self.session.query(JobListing).filter_by(
-                    link=job['link'],
-                    search_keyword=keyword
-                ).first()
+                for job in jobs:
+                    try:
+                        city_value = job.get('city') or job.get('location') or 'نامشخص'
 
-                if not existing:
-                    job_listing = JobListing(
-                        title=job['title'],
-                        company=job['company'],
-                        city=job['city'],
-                        link=job['link'],
-                        source=job['source'],
-                        search_keyword=keyword,
-                        is_active=True
-                    )
-                    self.session.add(job_listing)
-                    saved_count += 1
-            except Exception as e:
-                print(f"Error saving job: {e}")
-                continue
+                        existing = db.query(JobListing).filter_by(link=job.get('link', '')).first()
 
-        self.session.commit()
-        print(f"Saved {saved_count} new jobs to database")
+                        if not existing:
+                            job_listing = JobListing(
+                                title=job.get('title', 'نامشخص'),
+                                company=job.get('company', 'نامشخص'),
+                                city=city_value,
+                                link=job.get('link', ''),
+                                source=job.get('source', ''),
+                                search_keyword=search_keyword
+                            )
+                            db.add(job_listing)
+                            saved_count += 1
+
+                    except Exception as e:
+                        print(f"Error saving job: {e}")
+                        continue
+
+                db.commit()
+            finally:
+                db.close()
+
+            return saved_count
 
 
 
-    def scrape_all(self, keyword, sources, max_results_per_site=30):
+    # def scrape_all(self, keyword, sources, max_results_per_site=30, session_id=None):
+    #     """Scrape all selected sources for a specific session"""
+    #     # Clear previous results for this keyword
+    #     self.clear_previous_search(keyword)
+    #
+    #     all_jobs = []
+    #
+    #     if session_id:
+    #         self.session_manager.clear_session_jobs(session_id)
+    #         if 'jobinja' in sources:
+    #             print("Scraping Jobinja...")
+    #             try:
+    #                 jobinja_jobs = self.scrape_jobinja(keyword, max_results_per_site)
+    #                 all_jobs.extend(jobinja_jobs)
+    #                 print(f"Found {len(jobinja_jobs)} jobs on Jobinja")
+    #             except Exception as e:
+    #                 print(f"Error scraping Jobinja: {e}")
+    #
+    #         if 'jobvision' in sources:
+    #             print("Scraping Jobvision...")
+    #             try:
+    #                 jobvision_jobs = self.scrape_jobvision(keyword, max_results_per_site)
+    #                 all_jobs.extend(jobvision_jobs)
+    #                 print(f"Found {len(jobvision_jobs)} jobs on Jobvision")
+    #             except Exception as e:
+    #                 print(f"Error scraping Jobvision: {e}")
+    #
+    #         if 'irantalent' in sources:
+    #             print("Scraping irantalent...")
+    #             try:
+    #                 irantalent_jobs = self.scrape_irantalent(keyword, max_results_per_site)
+    #                 all_jobs.extend(irantalent_jobs)
+    #                 print(f"Found {len(irantalent_jobs)} jobs on irantalent")
+    #             except Exception as e:
+    #                 print(f"Error scraping irantalent: {e}")
+    #
+    #     # Save to database
+    #     if all_jobs and session_id:
+    #         self.session_manager.save_session_jobs(session_id, all_jobs, keyword)
+    #
+    #     return len(all_jobs)
+
+    def scrape_all(self, keyword, sources, max_results_per_site=30, session_id=None):
         """Scrape all selected sources"""
-        # Clear previous results for this keyword
-        self.clear_previous_search(keyword)
+        # Clear previous results for this session if session_id provided
+        if session_id and self.session_manager:
+            self.session_manager.clear_session_jobs(session_id)
 
         all_jobs = []
+
+        # ... your existing scraping code ...
 
         if 'jobinja' in sources:
             print("Scraping Jobinja...")
@@ -469,16 +556,19 @@ class JobScraper:
                 print(f"Error scraping Jobvision: {e}")
 
         if 'irantalent' in sources:
-            print("Scraping irantalent...")
+            print("Scraping IranTalent...")
             try:
                 irantalent_jobs = self.scrape_irantalent(keyword, max_results_per_site)
                 all_jobs.extend(irantalent_jobs)
-                print(f"Found {len(irantalent_jobs)} jobs on irantalent")
+                print(f"Found {len(irantalent_jobs)} jobs on IranTalent")
             except Exception as e:
-                print(f"Error scraping irantalent: {e}")
+                print(f"Error scraping IranTalent: {e}")
 
         # Save to database
         if all_jobs:
-            self.save_jobs(all_jobs, keyword)
+            self.save_jobs(all_jobs, keyword, session_id)
+            print(f"Saved {len(all_jobs)} total jobs to database")
 
         return len(all_jobs)
+
+
