@@ -70,8 +70,6 @@ class JobScraper:
     #         print(f"Error setting up Chrome driver: {e}")
     #         raise e
 
-
-
     def clear_previous_search(self, keyword):
         """Clear previous search results for the same keyword"""
         self.session.query(JobListing).filter_by(
@@ -281,169 +279,146 @@ class JobScraper:
         return jobs
 
     def scrape_irantalent(self, keyword, max_results=30):
-        """Alternative IranTalent scraper with different approach"""
+        """Fixed IranTalent scraper using the working URL format"""
+        from selenium.webdriver.common.by import By
+        from selenium.webdriver.support.ui import WebDriverWait
+        from selenium.webdriver.support import expected_conditions as EC
+
         jobs = []
         base_url = "https://www.irantalent.com"
 
         try:
-            from selenium.webdriver.common.by import By
-            from selenium.webdriver.support.ui import WebDriverWait
-            from selenium.webdriver.support import expected_conditions as EC
+            # Use the working URL format
+            search_url = f"{base_url}/jobs?q={keyword}"
+            print(f"Scraping IranTalent: {search_url}")
 
-            search_url = f"{base_url}/jobs/{keyword}"
             driver = self.setup_selenium()
             driver.get(search_url)
 
-            # Wait for specific elements
+            # Wait for Angular to initialize
+            print("Waiting for page to load...")
             try:
-                WebDriverWait(driver, 15).until(
-                    EC.presence_of_element_located((By.CLASS_NAME, "card-wrapper"))
+                wait = WebDriverWait(driver, 20)
+                wait.until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, 'a[href*="/job/"]'))
                 )
-                print("Job cards loaded!")
+                print("Job elements detected!")
             except:
-                print("Timeout waiting for job cards")
+                print("Timeout waiting for job elements")
 
-            # Additional wait
+            # Additional wait for all elements to load
             time.sleep(3)
 
-            # Execute JavaScript to get job data directly
-            job_data_script = """
-            var jobs = [];
-            var cards = document.querySelectorAll('div.card-wrapper');
+            # Scroll to load more if needed
+            driver.execute_script("window.scrollTo(0, 1000);")
+            time.sleep(2)
 
-            cards.forEach(function(card) {
-                var link = card.querySelector('a.position');
-                var title = card.querySelector('p.position-title');
-                var company = card.querySelector('p.color-light-black');
-                var location = card.querySelector('span.location');
-                var salaryDiv = card.querySelector('div.salary span');
-                var dateSpans = card.querySelectorAll('span.color-gray');
+            # Find job elements
+            job_elements = driver.find_elements(By.CSS_SELECTOR, 'a[href*="/job/"]')
+            print(f"Found {len(job_elements)} job elements")
 
-                if (link && title) {
-                    var dateText = '';
-                    dateSpans.forEach(function(span) {
-                        if (span.textContent.includes('روز پیش') || 
-                            span.textContent.includes('ساعت پیش') ||
-                            span.textContent.includes('هفته پیش')) {
-                            dateText = span.textContent.trim();
+            # Extract jobs
+            for element in job_elements[:max_results]:
+                try:
+                    href = element.get_attribute('href')
+                    if not href or '/job/' not in href:
+                        continue
+
+                    # Find the parent card
+                    card = element
+                    for _ in range(5):
+                        parent = card.find_element(By.XPATH, '..')
+                        if 'card' in parent.get_attribute('class') or 'position' in parent.get_attribute('class'):
+                            card = parent
+                            break
+                        card = parent
+
+                    # Extract data
+                    title = "نامشخص"
+                    company = "نامشخص"
+                    location = "تهران"
+                    salary = ""
+                    date = ""
+
+                    try:
+                        title_elem = card.find_element(By.CSS_SELECTOR, 'p.position-title, .position-title')
+                        title = title_elem.text.strip()
+                    except:
+                        pass
+
+                    try:
+                        company_elem = card.find_element(By.CSS_SELECTOR, 'p.color-light-black')
+                        company = company_elem.text.strip()
+                    except:
+                        pass
+
+                    try:
+                        location_elem = card.find_element(By.CSS_SELECTOR, 'span.location')
+                        location = location_elem.text.strip()
+                    except:
+                        pass
+
+                    try:
+                        salary_elem = card.find_element(By.CSS_SELECTOR, '.salary span')
+                        salary = salary_elem.text.strip()
+                    except:
+                        pass
+
+                    # Extract date
+                    try:
+                        date_elems = card.find_elements(By.CSS_SELECTOR, 'span.color-gray')
+                        for elem in date_elems:
+                            text = elem.text.strip()
+                            if any(word in text for word in ['روز پیش', 'ساعت پیش', 'هفته پیش', 'ماه پیش']):
+                                date = text
+                                break
+                    except:
+                        pass
+
+                    if title != "نامشخص":
+                        job_data = {
+                            'title': title,
+                            'company': company,
+                            'location': location,
+                            'link': href,
+                            'salary': salary,
+                            'date': date,
+                            'source': 'irantalent'
                         }
-                    });
+                        jobs.append(job_data)
+                        print(f"Found: {title} at {company}")
 
-                    jobs.push({
-                        link: link.getAttribute('href'),
-                        title: title.textContent.trim(),
-                        company: company ? company.textContent.trim() : 'نامشخص',
-                        location: location ? location.textContent.trim() : 'تهران',
-                        salary: salaryDiv ? salaryDiv.textContent.trim() : '',
-                        date: dateText
-                    });
-                }
-            });
-
-            return jobs;
-            """
-
-            # Execute script to get jobs
-            js_jobs = driver.execute_script(job_data_script)
-
-            print(f"Found {len(js_jobs)} jobs via JavaScript")
-
-            # Process JavaScript results
-            for js_job in js_jobs[:max_results]:
-                job_link = js_job['link']
-                if job_link.startswith('/'):
-                    job_link = base_url + job_link
-
-                job_data = {
-                    'title': js_job['title'],
-                    'company': js_job['company'],
-                    # 'location': js_job['location'],
-                    'city': js_job['location'],  # Changed from 'location' to 'city'
-                    'link': job_link,
-                    'salary': js_job['salary'],
-                    'date': js_job['date'],
-                    'source': 'irantalent'
-                }
-
-                jobs.append(job_data)
-                print(f"Added: {js_job['title']} at {js_job['company']}")
+                except Exception as e:
+                    print(f"Error extracting job: {e}")
+                    continue
 
             driver.quit()
 
         except Exception as e:
-            print(f"Error in alternative scraper: {e}")
+            print(f"IranTalent scraper error: {e}")
             import traceback
             traceback.print_exc()
 
         return jobs
 
-    def debug_irantalent(self, keyword):
-        """Debug function to see what's on the page"""
+    def clear_session_jobs(self, session_id):
+        """Clear all jobs for a specific session"""
+        db = DBSession()
         try:
-            driver = self.setup_selenium()
-            url = f"https://www.irantalent.com/jobs/{keyword}"
-            driver.get(url)
+            # Delete in batches to avoid locking issues
+            jobs_to_delete = db.query(JobListing).filter_by(session_id=session_id).all()
+            count = len(jobs_to_delete)
 
-            print("Waiting for page load...")
-            time.sleep(10)
+            for job in jobs_to_delete:
+                db.delete(job)
 
-            # Check various elements
-            checks = [
-                ('div.card-wrapper', 'Card wrappers'),
-                ('new-position-card', 'Position cards'),
-                ('a.position', 'Position links'),
-                ('p.position-title', 'Position titles'),
-                ('a[href*="/job/"]', 'Job links'),
-                ('.ng-star-inserted', 'Angular elements')
-            ]
-
-            for selector, name in checks:
-                elements = driver.find_elements(By.CSS_SELECTOR, selector)
-                print(f"{name}: {len(elements)} found")
-
-            # Save screenshot
-            driver.save_screenshot('irantalent_debug.png')
-            print("Screenshot saved as irantalent_debug.png")
-
-            # Save full HTML
-            with open('irantalent_full_debug.html', 'w', encoding='utf-8') as f:
-                f.write(driver.page_source)
-            print("Full HTML saved as irantalent_full_debug.html")
-
-            driver.quit()
-
+            db.commit()
+            print(f"Cleared {count} jobs for session {session_id}")
         except Exception as e:
-            print(f"Debug error: {e}")
-
-    # def save_jobs(self, jobs, keyword):
-    #     """Save jobs to database"""
-    #     saved_count = 0
-    #     for job in jobs:
-    #         try:
-    #             # Check if job already exists (by link)
-    #             existing = self.session.query(JobListing).filter_by(
-    #                 link=job['link'],
-    #                 search_keyword=keyword
-    #             ).first()
-    #
-    #             if not existing:
-    #                 job_listing = JobListing(
-    #                     title=job['title'],
-    #                     company=job['company'],
-    #                     city=job['city'],
-    #                     link=job['link'],
-    #                     source=job['source'],
-    #                     search_keyword=keyword,
-    #                     is_active=True
-    #                 )
-    #                 self.session.add(job_listing)
-    #                 saved_count += 1
-    #         except Exception as e:
-    #             print(f"Error saving job: {e}")
-    #             continue
-    #
-    #     self.session.commit()
-    #     print(f"Saved {saved_count} new jobs to database")
+            db.rollback()
+            print(f"Error clearing session jobs: {e}")
+        finally:
+            db.close()
 
     def save_jobs(self, jobs, search_keyword, session_id=None):
         """Save jobs to database using SQLAlchemy"""
@@ -483,50 +458,6 @@ class JobScraper:
 
             return saved_count
 
-
-
-    # def scrape_all(self, keyword, sources, max_results_per_site=30, session_id=None):
-    #     """Scrape all selected sources for a specific session"""
-    #     # Clear previous results for this keyword
-    #     self.clear_previous_search(keyword)
-    #
-    #     all_jobs = []
-    #
-    #     if session_id:
-    #         self.session_manager.clear_session_jobs(session_id)
-    #         if 'jobinja' in sources:
-    #             print("Scraping Jobinja...")
-    #             try:
-    #                 jobinja_jobs = self.scrape_jobinja(keyword, max_results_per_site)
-    #                 all_jobs.extend(jobinja_jobs)
-    #                 print(f"Found {len(jobinja_jobs)} jobs on Jobinja")
-    #             except Exception as e:
-    #                 print(f"Error scraping Jobinja: {e}")
-    #
-    #         if 'jobvision' in sources:
-    #             print("Scraping Jobvision...")
-    #             try:
-    #                 jobvision_jobs = self.scrape_jobvision(keyword, max_results_per_site)
-    #                 all_jobs.extend(jobvision_jobs)
-    #                 print(f"Found {len(jobvision_jobs)} jobs on Jobvision")
-    #             except Exception as e:
-    #                 print(f"Error scraping Jobvision: {e}")
-    #
-    #         if 'irantalent' in sources:
-    #             print("Scraping irantalent...")
-    #             try:
-    #                 irantalent_jobs = self.scrape_irantalent(keyword, max_results_per_site)
-    #                 all_jobs.extend(irantalent_jobs)
-    #                 print(f"Found {len(irantalent_jobs)} jobs on irantalent")
-    #             except Exception as e:
-    #                 print(f"Error scraping irantalent: {e}")
-    #
-    #     # Save to database
-    #     if all_jobs and session_id:
-    #         self.session_manager.save_session_jobs(session_id, all_jobs, keyword)
-    #
-    #     return len(all_jobs)
-
     def scrape_all(self, keyword, sources, max_results_per_site=30, session_id=None):
         """Scrape all selected sources"""
         # Clear previous results for this session if session_id provided
@@ -535,40 +466,38 @@ class JobScraper:
 
         all_jobs = []
 
-        # ... your existing scraping code ...
-
         if 'jobinja' in sources:
             print("Scraping Jobinja...")
             try:
                 jobinja_jobs = self.scrape_jobinja(keyword, max_results_per_site)
                 all_jobs.extend(jobinja_jobs)
-                print(f"Found {len(jobinja_jobs)} jobs on Jobinja")
+                print(f"✅ Found {len(jobinja_jobs)} jobs on Jobinja")
             except Exception as e:
-                print(f"Error scraping Jobinja: {e}")
+                print(f"❌ Error scraping Jobinja: {e}")
 
         if 'jobvision' in sources:
             print("Scraping Jobvision...")
             try:
                 jobvision_jobs = self.scrape_jobvision(keyword, max_results_per_site)
                 all_jobs.extend(jobvision_jobs)
-                print(f"Found {len(jobvision_jobs)} jobs on Jobvision")
+                print(f"✅ Found {len(jobvision_jobs)} jobs on Jobvision")
             except Exception as e:
-                print(f"Error scraping Jobvision: {e}")
+                print(f"❌ Error scraping Jobvision: {e}")
 
         if 'irantalent' in sources:
             print("Scraping IranTalent...")
             try:
                 irantalent_jobs = self.scrape_irantalent(keyword, max_results_per_site)
                 all_jobs.extend(irantalent_jobs)
-                print(f"Found {len(irantalent_jobs)} jobs on IranTalent")
+                print(f"✅ Found {len(irantalent_jobs)} jobs on IranTalent")
             except Exception as e:
-                print(f"Error scraping IranTalent: {e}")
+                print(f"❌ Error scraping IranTalent: {e}")
 
         # Save to database
         if all_jobs:
-            self.save_jobs(all_jobs, keyword, session_id)
-            print(f"Saved {len(all_jobs)} total jobs to database")
+            saved = self.save_jobs(all_jobs, keyword, session_id)
+            print(f"💾 Total jobs found: {len(all_jobs)}, Successfully saved: {saved}")
+        else:
+            print("⚠️ No jobs found from any source")
 
         return len(all_jobs)
-
-

@@ -164,6 +164,13 @@ def cleanup_old_sessions():
         app.last_cleanup = datetime.now()
 
 
+# Add this route temporarily for testing
+@app.route('/test-irantalent')
+def test_irantalent():
+    scraper = JobScraper()
+    scraper.test_irantalent_simple('python')
+    return "Check console output and generated files"
+
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     debug = os.environ.get('FLASK_ENV') != 'production'

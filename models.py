@@ -21,6 +21,7 @@ class JobListing(Base):
     link = Column(String(500), unique=True)
     source = Column(String(50))
     search_keyword = Column(String(100))
+    # date_posted = Column(String(100))  # Add this field for the Persian date text
     created_at = Column(DateTime, default=datetime.now)
     is_active = Column(Boolean, default=True)
     session_id = Column(String(100), index=True)  # Add session support

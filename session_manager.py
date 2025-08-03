@@ -25,17 +25,8 @@ class SessionJobManager:
         finally:
             db.close()
 
-    def clear_session_jobs(self, session_id):
-        """Clear all jobs for a specific session"""
-        db = DBSession()
-        try:
-            db.query(JobListing).filter_by(session_id=session_id).delete()
-            db.commit()
-        finally:
-            db.close()
-
     def save_session_jobs(self, session_id, jobs, search_keyword):
-        """Save jobs for a specific session"""
+        """Save jobs for a specific session with proper duplicate handling"""
         db = DBSession()
         saved_count = 0
 
@@ -45,13 +36,21 @@ class SessionJobManager:
                     # Handle both 'city' and 'location' field names
                     city_value = job.get('city') or job.get('location') or 'نامشخص'
 
-                    # Check if job already exists for this session
+                    # First check if this job already exists for this session
                     existing = db.query(JobListing).filter_by(
                         session_id=session_id,
                         link=job.get('link', '')
                     ).first()
 
-                    if not existing:
+                    if existing:
+                        # Update existing job if needed
+                        existing.title = job.get('title', existing.title)
+                        existing.company = job.get('company', existing.company)
+                        existing.city = city_value
+                        existing.search_keyword = search_keyword
+                        print(f"Updated existing job: {existing.title}")
+                    else:
+                        # Create new job
                         job_listing = JobListing(
                             session_id=session_id,
                             title=job.get('title', 'نامشخص'),
@@ -64,15 +63,42 @@ class SessionJobManager:
                         db.add(job_listing)
                         saved_count += 1
 
+                    # Commit after each job to avoid bulk constraint errors
+                    db.commit()
+
                 except Exception as e:
+                    db.rollback()  # Rollback the failed transaction
                     print(f"Error saving job: {e}")
+                    print(f"Job data: {job}")
                     continue
 
-            db.commit()
+        except Exception as e:
+            db.rollback()
+            print(f"Error in save_session_jobs: {e}")
         finally:
             db.close()
 
+        print(f"Successfully saved {saved_count} new jobs")
         return saved_count
+
+    def clear_session_jobs(self, session_id):
+        """Clear all jobs for a specific session"""
+        db = DBSession()
+        try:
+            # Delete in batches to avoid locking issues
+            jobs_to_delete = db.query(JobListing).filter_by(session_id=session_id).all()
+            count = len(jobs_to_delete)
+
+            for job in jobs_to_delete:
+                db.delete(job)
+
+            db.commit()
+            print(f"Cleared {count} jobs for session {session_id}")
+        except Exception as e:
+            db.rollback()
+            print(f"Error clearing session jobs: {e}")
+        finally:
+            db.close()
 
     def get_session_jobs(self, session_id, source=None, city=None, company=None):
         """Get jobs for a specific session with optional filters"""
