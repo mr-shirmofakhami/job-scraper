@@ -6,6 +6,67 @@
     <title>Job Scraper - جستجوی شغل</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        .sort-controls {
+            margin: 20px 0;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+        }
+
+        .sort-controls label {
+            font-weight: bold;
+            color: #333;
+        }
+
+        .sort-controls select {
+            padding: 8px 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 14px;
+            background: white;
+        }
+
+        .date-posted {
+            color: #666;
+            font-size: 14px;
+        }
+
+        .date-today {
+            color: #28a745;
+            font-weight: bold;
+        }
+
+        .date-recent {
+            color: #17a2b8;
+        }
+
+        .date-old {
+            color: #6c757d;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        .btn-secondary {
+            background-color: #6c757d;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+
+        .btn-secondary:hover {
+            background-color: #545b62;
+        }
+    </style>
 </head>
 <body>
     <div class="container">
@@ -20,9 +81,6 @@
             <div class="search-form">
                 <div class="input-group">
                     <input type="text" id="keyword" placeholder="کلمه کلیدی (مثلا: dba)" />
-                    <button id="searchBtn" onclick="startScraping()">
-                        <i class="fas fa-search"></i> جستجو
-                    </button>
                 </div>
 
                 <div class="sources">
@@ -44,6 +102,15 @@
                         <img src="https://www.irantalent.com/assets/css/images/products/irantalent.svg" alt="irantalent" class="site-icon">
                         irantalent
                     </label>
+                </div>
+
+                <div class="button-group">
+                    <button id="searchBtn" onclick="startScraping()">
+                        <i class="fas fa-search"></i> جستجو
+                    </button>
+                    <button id="clearBtn" onclick="clearSession()" class="btn-secondary">
+                        <i class="fas fa-trash"></i> پاک کردن نتایج
+                    </button>
                 </div>
 
                 <div id="status" class="status"></div>
@@ -84,6 +151,15 @@
             </div>
         </div>
 
+        <!-- Sort controls -->
+        <div class="sort-controls" id="sortControls" style="display: none;">
+            <label for="sortSelect">مرتب‌سازی بر اساس:</label>
+            <select id="sortSelect" onchange="sortJobs()">
+                <option value="newest">جدیدترین</option>
+                <option value="oldest">قدیمی‌ترین</option>
+            </select>
+        </div>
+
         <!-- Results Section -->
         <div class="results-section">
             <div class="results-header">
@@ -98,8 +174,8 @@
                             <th>عنوان شغل</th>
                             <th>شرکت</th>
                             <th>شهر</th>
+                            <th>تاریخ آگهی</th>
                             <th>منبع</th>
-                            <th>تاریخ</th>
                             <th>عملیات</th>
                         </tr>
                     </thead>
@@ -116,38 +192,26 @@
         </div>
     </div>
 
-        <!-- Add this button to your interface -->
-    <button type="button" id="clear-results" class="btn btn-warning">
-         پاک کردن نتایج
-    </button>
-
     <script>
         let statusInterval;
+        let currentFilters = {};
 
-        // Add this to your JavaScript
-        document.getElementById('clear-results').addEventListener('click', function() {
-        if (confirm('آیا مطمئن هستید که می‌خواهید نتایج را پاک کنید؟')) {
-        fetch('/api/clear-session', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
+        function getDateClass(dateText) {
+            if (!dateText || dateText === 'نامشخص') return '';
+
+            if (dateText.includes('امروز') || dateText.includes('ساعت')) {
+                return 'date-today';
+            } else if (dateText.includes('دیروز') || dateText.includes('1 روز') || dateText.includes('2 روز') || dateText.includes('3 روز')) {
+                return 'date-recent';
+            } else {
+                return 'date-old';
             }
-        })
-        .then(response => response.json())
-        .then(data => {
-            alert(data.message);
-            // Reload the page or clear the results display
-            location.reload();
-        });
-         }
-        });
+        }
 
-        // Optional: Show session info
-        fetch('/api/session-info')
-        .then(response => response.json())
-        .then(data => {
-            console.log('Session info:', data);
-         });
+        function sortJobs() {
+            const sortValue = document.getElementById('sortSelect').value;
+            loadJobs();
+        }
 
         async function startScraping() {
             const keyword = document.getElementById('keyword').value.trim();
@@ -163,6 +227,23 @@
                 showNotification('لطفا حداقل یک منبع را انتخاب کنید', 'error');
                 return;
             }
+
+            // Clear previous results immediately
+            const tbody = document.getElementById('resultsBody');
+            tbody.innerHTML = `
+                <tr class="no-data">
+                    <td colspan="6">
+                        <i class="fas fa-spinner fa-spin"></i>
+                        <p>در حال جستجو...</p>
+                    </td>
+                </tr>
+            `;
+
+            // Hide sort controls
+            document.getElementById('sortControls').style.display = 'none';
+
+            // Clear results count
+            document.getElementById('resultsCount').innerHTML = '';
 
             document.getElementById('searchBtn').disabled = true;
             document.getElementById('searchBtn').innerHTML = '<i class="fas fa-spinner fa-spin"></i> در حال جستجو...';
@@ -209,7 +290,7 @@
                 } else {
                     clearInterval(statusInterval);
 
-                    if (status.message.includes('Successfully')) {
+                    if (status.message.includes('Successfully') || status.message.includes('تعداد')) {
                         document.getElementById('status').innerHTML = `<i class="fas fa-check-circle"></i> ${status.message}`;
                         document.getElementById('status').className = 'status success';
                         showNotification('جستجو با موفقیت انجام شد', 'success');
@@ -231,11 +312,15 @@
             const city = document.getElementById('cityFilter').value;
             const company = document.getElementById('companyFilter').value;
             const source = document.getElementById('sourceFilter').value;
+            const sort = document.getElementById('sortSelect').value;
 
             const params = new URLSearchParams();
             if (city) params.append('city', city);
             if (company) params.append('company', company);
             if (source) params.append('source', source);
+            if (sort) params.append('sort', sort);
+
+            currentFilters = { city, company, source, sort };
 
             try {
                 const response = await fetch(`/api/jobs?${params}`);
@@ -278,6 +363,7 @@
         function displayJobs(jobs) {
             const tbody = document.getElementById('resultsBody');
             const countDiv = document.getElementById('resultsCount');
+            const sortControls = document.getElementById('sortControls');
 
             countDiv.innerHTML = `<i class="fas fa-chart-bar"></i> تعداد نتایج: ${jobs.length}`;
 
@@ -290,46 +376,79 @@
                         </td>
                     </tr>
                 `;
+                sortControls.style.display = 'none';
                 return;
             }
 
-            tbody.innerHTML = jobs.map(job => `
-                <tr>
-                    <td class="job-title">
-                        <i class="fas fa-briefcase"></i>
-                        ${job.title}
-                    </td>
-                    <td class="company">
-                        <i class="fas fa-building"></i>
-                        ${job.company}
-                    </td>
-                    <td class="city">
-                        <i class="fas fa-map-marker-alt"></i>
-                        ${job.city}
-                    </td>
-                    <td>
-                        <span class="source-badge ${job.source}">
-                            ${job.source}
-                        </span>
-                    </td>
-                    <td class="date">
-                        <i class="fas fa-calendar"></i>
-                        ${formatDate(job.created_at)}
-                    </td>
-                    <td class="actions">
-                        <a href="${job.link}" target="_blank" class="btn-view">
-                            <i class="fas fa-external-link-alt"></i>
-                            مشاهده
-                        </a>
-                    </td>
-                </tr>
-            `).join('');
+            sortControls.style.display = 'flex';
+
+            tbody.innerHTML = jobs.map(job => {
+                const dateClass = getDateClass(job.date_posted);
+                return `
+                    <tr>
+                        <td class="job-title">
+                            <i class="fas fa-briefcase"></i>
+                            ${job.title}
+                        </td>
+                        <td class="company">
+                            <i class="fas fa-building"></i>
+                            ${job.company}
+                        </td>
+                        <td class="city">
+                            <i class="fas fa-map-marker-alt"></i>
+                            ${job.city}
+                        </td>
+                        <td class="date-posted ${dateClass}">
+                            <i class="fas fa-clock"></i>
+                            ${job.date_posted || 'نامشخص'}
+                        </td>
+                        <td>
+                            <span class="source-badge ${job.source}">
+                                ${job.source}
+                            </span>
+                        </td>
+                        <td class="actions">
+                            <a href="${job.link}" target="_blank" class="btn-view">
+                                <i class="fas fa-external-link-alt"></i>
+                                مشاهده
+                            </a>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
         }
 
-        function formatDate(dateString) {
-            const date = new Date(dateString);
-            const options = { year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' };
-            return date.toLocaleDateString('fa-IR', options);
+        async function clearSession() {
+            if (confirm('آیا مطمئن هستید که می‌خواهید تمام نتایج را پاک کنید؟')) {
+                try {
+                    const response = await fetch('/api/clear-session', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        }
+                    });
+
+                    const result = await response.json();
+                    showNotification(result.message, 'success');
+
+                    // Clear the display
+                    const tbody = document.getElementById('resultsBody');
+                    tbody.innerHTML = `
+                        <tr class="no-data">
+                            <td colspan="6">
+                                <i class="fas fa-inbox"></i>
+                                <p>نتیجه‌ای برای نمایش وجود ندارد</p>
+                            </td>
+                        </tr>
+                    `;
+
+                    document.getElementById('resultsCount').innerHTML = '';
+                    document.getElementById('sortControls').style.display = 'none';
+
+                } catch (error) {
+                    showNotification('خطا در پاک کردن نتایج', 'error');
+                }
+            }
         }
 
         function clearFilters() {
@@ -360,10 +479,20 @@
             }, 3000);
         }
 
-        // Load jobs and filters on page load
+        // Load filters on page load, don't load jobs automatically
         window.onload = function() {
-            loadJobs();
             loadFilters();
+
+            // Clear any existing results
+            const tbody = document.getElementById('resultsBody');
+            tbody.innerHTML = `
+                <tr class="no-data">
+                    <td colspan="6">
+                        <i class="fas fa-inbox"></i>
+                        <p>نتیجه‌ای برای نمایش وجود ندارد</p>
+                    </td>
+                </tr>
+            `;
         };
     </script>
 </body>

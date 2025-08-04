@@ -4,7 +4,7 @@ import uuid
 import os
 from datetime import datetime, timedelta
 from job_scraper import JobScraper
-from session_manager import SessionJobManager
+from session_manager import SessionManager
 from models import Session as DBSession, JobListing
 import threading
 
@@ -23,12 +23,16 @@ FlaskSession(app)
 # Create sessions directory
 os.makedirs('./data/sessions', exist_ok=True)
 
-# Global variable to track scraping status
-scraping_status = {'is_scraping': False, 'message': ''}
+# Global variables for scraping status
+scraping_status = {
+    'is_scraping': False,
+    'message': 'Ready',
+    'progress': 0
+}
 
-# Initialize session manager
-session_manager = SessionJobManager()
-
+# Initialize components
+session_manager = SessionManager(DBSession)
+job_scraper = JobScraper(session_manager)  # Pass session_manager to JobScraper
 
 @app.route('/')
 def index():
@@ -42,46 +46,69 @@ def index():
 
 
 @app.route('/api/scrape', methods=['POST'])
-def scrape_jobs():
+def start_scraping():
     global scraping_status
 
     if scraping_status['is_scraping']:
-        return jsonify({'error': 'جستجو در حال انجام است'}), 400
+        return jsonify({'error': 'Scraping already in progress'}), 400
 
     data = request.json
-    keyword = data.get('keyword', '').strip()
+    keyword = data.get('keyword', '')
     sources = data.get('sources', [])
 
-    # Get session ID
-    if 'session_id' not in session:
-        session['session_id'] = str(uuid.uuid4())
-    session_id = session['session_id']
-
     if not keyword:
-        return jsonify({'error': 'کلمه کلیدی الزامی است'}), 400
+        return jsonify({'error': 'Keyword is required'}), 400
 
     if not sources:
-        return jsonify({'error': 'حداقل یک منبع باید انتخاب شود'}), 400
+        return jsonify({'error': 'At least one source is required'}), 400
 
-    # Start scraping in background
-    scraping_status['is_scraping'] = True
-    scraping_status['message'] = 'شروع جستجو...'
+    # Get or create session ID
+    if 'session_id' not in session:
+        session['session_id'] = str(uuid.uuid4())
 
-    def scrape_in_background():
-        global scraping_status
-        try:
-            scraper = JobScraper(session_manager=session_manager)
-            total_jobs = scraper.scrape_all(keyword, sources, session_id=session_id)
-            scraping_status['message'] = f'تعداد {total_jobs} آگهی یافت شد'
-        except Exception as e:
-            scraping_status['message'] = f'خطا: {str(e)}'
-        finally:
-            scraping_status['is_scraping'] = False
+    session_id = session['session_id']
 
-    thread = threading.Thread(target=scrape_in_background)
+    # Start scraping in background thread
+    thread = threading.Thread(
+        target=scrape_background,
+        args=(keyword, sources, session_id)
+    )
+    thread.daemon = True
     thread.start()
 
-    return jsonify({'message': 'جستجو شروع شد', 'session_id': session_id})
+    return jsonify({'message': 'Scraping started', 'session_id': session_id})
+
+def scrape_background(keyword, sources, session_id):
+    global scraping_status
+
+    try:
+        scraping_status = {
+            'is_scraping': True,
+            'message': 'Starting scrape...',
+            'progress': 0
+        }
+
+        # Clear previous results for this session
+        session_manager.clear_session_jobs(session_id)
+
+        scraping_status['message'] = 'Scraping jobs...'
+        scraping_status['progress'] = 20
+
+        # Scrape jobs
+        total_jobs = job_scraper.scrape_all(keyword, sources, session_id=session_id)
+
+        scraping_status = {
+            'is_scraping': False,
+            'message': f'Successfully found {total_jobs} jobs',
+            'progress': 100
+        }
+
+    except Exception as e:
+        scraping_status = {
+            'is_scraping': False,
+            'message': f'Error: {str(e)}',
+            'progress': 0
+        }
 
 
 @app.route('/api/status')
@@ -100,9 +127,10 @@ def get_jobs():
     city = request.args.get('city', '')
     company = request.args.get('company', '')
     source = request.args.get('source', '')
+    sort_by = request.args.get('sort', 'newest')
 
     # Get jobs for this session
-    jobs = session_manager.get_session_jobs(session_id, source, city, company)
+    jobs = session_manager.get_session_jobs(session_id, source, city, company, sort_by)
 
     return jsonify(jobs)
 
@@ -114,10 +142,19 @@ def get_filters():
     if not session_id:
         return jsonify({'cities': [], 'companies': []})
 
-    # Get filters for this session
-    filters = session_manager.get_session_filters(session_id)
+    # Get unique cities and companies for this session
+    jobs = session_manager.get_session_jobs(session_id)
 
-    return jsonify(filters)
+    cities = list(set(job['city'] for job in jobs if job['city']))
+    companies = list(set(job['company'] for job in jobs if job['company']))
+
+    cities.sort()
+    companies.sort()
+
+    return jsonify({
+        'cities': cities,
+        'companies': companies
+    })
 
 
 @app.route('/api/clear-session', methods=['POST'])
@@ -130,24 +167,20 @@ def clear_session():
     return jsonify({'message': 'نتایج پاک شد', 'session_id': session_id})
 
 
+
 @app.route('/api/session-info')
 def session_info():
-    """Get current session information"""
     session_id = session.get('session_id')
     if not session_id:
-        return jsonify({'session_id': None, 'job_count': 0})
+        session['session_id'] = str(uuid.uuid4())
+        session_id = session['session_id']
 
-    db = DBSession()
-    try:
-        job_count = db.query(JobListing).filter_by(session_id=session_id).count()
+    jobs = session_manager.get_session_jobs(session_id)
 
-        return jsonify({
-            'session_id': session_id,
-            'job_count': job_count,
-            'created_at': session.get('created_at')
-        })
-    finally:
-        db.close()
+    return jsonify({
+        'session_id': session_id,
+        'job_count': len(jobs)
+    })
 
 
 # Add cleanup task
