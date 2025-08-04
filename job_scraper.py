@@ -105,21 +105,41 @@ class JobScraper:
                     except:
                         pass
 
-                    # Extract company
+                    # # Extract company
+                    # company = "نامشخص"
+                    # try:
+                    #     company_elem = card.find_element(By.CSS_SELECTOR, "span.c-jobListView__company")
+                    #     company = company_elem.text.strip()
+                    # except:
+                    #     pass
+                    #
+                    # # Extract location
+                    # location = "تهران"
+                    # try:
+                    #     location_elem = card.find_element(By.CSS_SELECTOR, "span.c-jobListView__locationText")
+                    #     location = location_elem.text.strip()
+                    # except:
+                    #     pass
+
+                    # Extract company (first <li> > <span> inside the <ul>)
                     company = "نامشخص"
                     try:
-                        company_elem = card.find_element(By.CSS_SELECTOR, "span.c-jobListView__company")
-                        company = company_elem.text.strip()
+                        # Selector: Targets the <span> in the first <li> of the <ul>
+                        company_elem = card.find_element(By.CSS_SELECTOR,
+                                                         "ul.o-listView__itemComplementInfo > li:first-child > span")
+                        company = company_elem.text.strip()  # Strips extra spaces; result: "تجارت الکترونیک پارسیان | Parsian E-commerce"
                     except:
-                        pass
+                        pass  # Or log an error: print("Company not found")
 
-                    # Extract location
-                    location = "تهران"
+                    # Extract location/city (second <li> > <span> inside the <ul>)
+                    location = "unknown"
                     try:
-                        location_elem = card.find_element(By.CSS_SELECTOR, "span.c-jobListView__locationText")
-                        location = location_elem.text.strip()
+                        # Selector: Targets the <span> in the second <li> of the <ul>
+                        location_elem = card.find_element(By.CSS_SELECTOR,
+                                                          "ul.o-listView__itemComplementInfo > li:nth-child(2) > span")
+                        location = location_elem.text.strip()  # Strips extra spaces; result: "تهران، تهران"
                     except:
-                        pass
+                        pass  # Or log an error: print("Location not found")
 
                     job_data = {
                         'title': title,
@@ -191,7 +211,6 @@ class JobScraper:
 
                     title = "نامشخص"
                     company = "نامشخص"
-                    location = "تهران"
                     date = ""
 
                     try:
@@ -207,16 +226,27 @@ class JobScraper:
                         pass
 
                     # Extract location and date
+                    location = "unknown"
                     try:
-                        # Look for location in text-secondary elements
-                        location_elements = card.find_elements(By.CSS_SELECTOR, '.text-secondary')
-                        for elem in location_elements:
-                            text = elem.text.strip()
-                            if any(city in text for city in
-                                   ['تهران', 'اصفهان', 'شیراز', 'مشهد', 'کرج', 'اهواز', 'تبریز']):
-                                location = text.split('،')[0].strip()
-                                break
-                    except:
+                        # Target the container <div> with stable classes
+                        location_div = card.find_element(By.CSS_SELECTOR,
+                                                         'div.d-flex.flex-wrap.align-items-center.text-secondary.line-height-24')
+
+                        # Get the first <span> inside it (which contains the location text)
+                        location_span = location_div.find_element(By.CSS_SELECTOR,
+                                                                  'span.text-secondary.pointer-events-none.ng-star-inserted')
+
+                        # Extract and clean the text (e.g., "اصفهان ، مارنان")
+                        full_location = location_span.text.strip()
+
+                        # Split by Persian comma to get just the city (first part), e.g., "اصفهان"
+                        if '،' in full_location:
+                            location = full_location.split('،')[0].strip()
+                        else:
+                            location = full_location  # Fallback if no comma
+                    except Exception as e:
+                        # Optional: Log the error for debugging (e.g., if structure changes)
+                        print(f"Error extracting location: {e}")
                         pass
 
                     try:
@@ -272,8 +302,15 @@ class JobScraper:
         base_url = "https://www.irantalent.com"
 
         try:
-            # search_url = f"{base_url}/jobs?q={keyword}"
-            search_url = f"{base_url}/jobs/{keyword}"
+            # Check if keyword contains multiple words
+            if ' ' in keyword.strip():
+                # Multiple words - use search format with dashes
+                keyword_formatted = keyword.strip().replace(' ', '-')
+                search_url = f"{base_url}/jobs/search?keyword={keyword_formatted}&language=persian"
+            else:
+                # Single word - use simple format
+                search_url = f"{base_url}/jobs/{keyword}"
+
             print(f"Scraping IranTalent: {search_url}")
 
             driver = self.setup_selenium()
